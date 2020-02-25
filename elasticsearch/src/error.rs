@@ -38,7 +38,7 @@ enum Kind {
     Lib(String),
 
     /// HTTP library error
-    Http(reqwest::Error),
+    Http(surf::Exception),
 
     /// IO error
     Io(io::Error),
@@ -55,8 +55,8 @@ impl From<io::Error> for Error {
     }
 }
 
-impl From<reqwest::Error> for Error {
-    fn from(err: reqwest::Error) -> Error {
+impl From<surf::Exception> for Error {
+    fn from(err: surf::Exception) -> Error {
         Error {
             kind: Kind::Http(err),
         }
@@ -100,7 +100,7 @@ impl error::Error for Error {
         match &self.kind {
             Kind::Build(err) => Some(err),
             Kind::Lib(_) => None,
-            Kind::Http(err) => Some(err),
+            Kind::Http(err) => None,  // TODO: cannot be some due to not Sized
             Kind::Io(err) => Some(err),
             Kind::Json(err) => Some(err),
         }

@@ -1,6 +1,6 @@
 //! HTTP header names and values, including those specific to Elasticsearch
 
-pub use reqwest::header::*;
+pub use http::header::*;
 
 /// The default user-agent header value sent by the client
 pub static DEFAULT_USER_AGENT: &str = concat!("elasticsearch-rs/", env!("CARGO_PKG_VERSION"));

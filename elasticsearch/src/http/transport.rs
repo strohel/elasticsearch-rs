@@ -77,7 +77,6 @@ pub static DEFAULT_ADDRESS: &str = "http://localhost:9200";
 
 /// Builds a HTTP transport to make API calls to Elasticsearch
 pub struct TransportBuilder {
-    client_builder: reqwest::ClientBuilder,
     conn_pool: Box<dyn ConnectionPool>,
     credentials: Option<Credentials>,
     proxy: Option<Url>,
@@ -93,7 +92,6 @@ impl TransportBuilder {
         P: ConnectionPool + Debug + Clone + Send + 'static,
     {
         Self {
-            client_builder: reqwest::ClientBuilder::new(),
             conn_pool: Box::new(conn_pool),
             credentials: None,
             proxy: None,
@@ -132,32 +130,17 @@ impl TransportBuilder {
 
     /// Builds a [Transport] to use to send API calls to Elasticsearch.
     pub fn build(self) -> Result<Transport, BuildError> {
-        let mut client_builder = self.client_builder;
-
         if let Some(c) = &self.credentials {
-            client_builder = match c {
-                Credentials::Cert(b, p) => {
-                    let pkcs12 = reqwest::Identity::from_pkcs12_der(&b, p)?;
-                    client_builder.identity(pkcs12)
-                }
-                _ => client_builder,
-            }
+            todo!()
         };
 
         if self.disable_proxy {
-            client_builder = client_builder.no_proxy();
+            todo!()
         } else if let Some(url) = self.proxy {
-            let mut proxy = reqwest::Proxy::all(url)?;
-            if let Some(c) = self.proxy_credentials {
-                proxy = match c {
-                    Credentials::Basic(u, p) => proxy.basic_auth(&u, &p),
-                    _ => proxy,
-                };
-            }
-            client_builder = client_builder.proxy(proxy);
+            todo!()
         }
 
-        let client = client_builder.build()?;
+        let client = http_client::native::NativeClient::new();
         Ok(Transport {
             client,
             conn_pool: self.conn_pool,
@@ -199,19 +182,19 @@ impl Connection {
 /// using a [Connection] selected from a [ConnectionPool]
 #[derive(Debug, Clone)]
 pub struct Transport {
-    client: reqwest::Client,
+    client: http_client::native::NativeClient,
     credentials: Option<Credentials>,
     conn_pool: Box<dyn ConnectionPool>,
 }
 
 impl Transport {
-    fn method(&self, method: Method) -> reqwest::Method {
+    fn method(&self, method: Method) -> http::Method {
         match method {
-            Method::Get => reqwest::Method::GET,
-            Method::Put => reqwest::Method::PUT,
-            Method::Post => reqwest::Method::POST,
-            Method::Delete => reqwest::Method::DELETE,
-            Method::Head => reqwest::Method::HEAD,
+            Method::Get => http::Method::GET,
+            Method::Put => http::Method::PUT,
+            Method::Post => http::Method::POST,
+            Method::Delete => http::Method::DELETE,
+            Method::Head => http::Method::HEAD,
         }
     }
 
@@ -256,14 +239,17 @@ impl Transport {
     {
         let connection = self.conn_pool.next();
         let url = connection.url.join(path.trim_start_matches('/'))?;
-        let reqwest_method = self.method(method);
-        let mut request_builder = self.client.request(reqwest_method, url);
 
-        let mut headers = headers;
-        headers.insert(CONTENT_TYPE, HeaderValue::from_static(DEFAULT_CONTENT_TYPE));
-        headers.insert(ACCEPT, HeaderValue::from_static(DEFAULT_ACCEPT));
-        headers.insert(USER_AGENT, HeaderValue::from_static(DEFAULT_USER_AGENT));
-        request_builder = request_builder.headers(headers);
+        let http_method = self.method(method);
+        let mut request = surf::Request::with_client(http_method, url, self.client.clone());
+
+        for (name, value) in headers.iter() {
+            request = request.set_header(name, value.to_str().unwrap());
+        }
+        request = request
+            .set_header(CONTENT_TYPE, DEFAULT_CONTENT_TYPE)
+            .set_header(ACCEPT, DEFAULT_ACCEPT)
+            .set_header(USER_AGENT, DEFAULT_USER_AGENT);
 
         if let Some(b) = body {
             let bytes = if let Some(bytes) = b.bytes() {
@@ -274,43 +260,38 @@ impl Transport {
                 bytes_mut.split().freeze()
             };
 
-            request_builder = request_builder.body(bytes);
+            request = request.body_bytes(bytes);
         };
 
         if let Some(q) = query_string {
-            request_builder = request_builder.query(q);
+            request = request.set_query(q).unwrap();
         }
 
-        if let Some(c) = &self.credentials {
-            request_builder = match c {
-                Credentials::Basic(u, p) => request_builder.basic_auth(u, Some(p)),
-                Credentials::Bearer(t) => request_builder.bearer_auth(t),
-                Credentials::Cert(_, _) => request_builder,
-                Credentials::ApiKey(i, k) => {
-                    let mut header_value = b"ApiKey ".to_vec();
-                    {
-                        let mut encoder = Base64Encoder::new(&mut header_value, base64::STANDARD);
-                        write!(encoder, "{}:", i).unwrap();
-                        write!(encoder, "{}", k).unwrap();
-                    }
-                    request_builder.header(
-                        AUTHORIZATION,
-                        HeaderValue::from_bytes(&header_value).unwrap(),
-                    )
-                }
-            }
+        if let Some(_c) = &self.credentials {
+            todo!()
+        //     request_builder = match c {
+        //         Credentials::Basic(u, p) => request_builder.basic_auth(u, Some(p)),
+        //         Credentials::Bearer(t) => request_builder.bearer_auth(t),
+        //         Credentials::Cert(_, _) => request_builder,
+        //         Credentials::ApiKey(i, k) => {
+        //             let mut header_value = b"ApiKey ".to_vec();
+        //             {
+        //                 let mut encoder = Base64Encoder::new(&mut header_value, base64::STANDARD);
+        //                 write!(encoder, "{}:", i).unwrap();
+        //                 write!(encoder, "{}", k).unwrap();
+        //             }
+        //             request_builder.header(
+        //                 AUTHORIZATION,
+        //                 HeaderValue::from_bytes(&header_value).unwrap(),
+        //             )
+        //         }
+        //     }
         }
 
-        let response = request_builder.send().await;
+        let response = request.await;
         match response {
             Ok(r) => Ok(Response::new(r)),
-            Err(e) => {
-                if e.is_timeout() {
-                    Err(Error::lib(format!("Request timed out to {:?}", e.url())))
-                } else {
-                    Err(e.into())
-                }
-            }
+            Err(e) => Err(e.into())
         }
     }
 }

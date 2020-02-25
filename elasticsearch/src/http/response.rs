@@ -1,18 +1,16 @@
 //! HTTP response components
 
-extern crate reqwest;
-
 use crate::error::Error;
-use reqwest::header::HeaderMap;
-use reqwest::StatusCode;
+use http::header::HeaderMap;
+use http::StatusCode;
 use serde::de::DeserializeOwned;
 
 /// A response from Elasticsearch
-pub struct Response(reqwest::Response);
+pub struct Response(surf::Response);
 
 impl Response {
     /// Creates a new instance of an Elasticsearch response
-    pub fn new(response: reqwest::Response) -> Self {
+    pub fn new(response: surf::Response) -> Self {
         Self(response)
     }
 
@@ -22,16 +20,16 @@ impl Response {
     }
 
     /// The response headers
-    pub fn headers(&self) -> &HeaderMap {
-        self.0.headers()
-    }
+    // pub fn headers(&self) -> &HeaderMap {
+    //     self.0.headers()
+    // } // TODO - cannot get HeaderMap
 
     /// Asynchronously read the response body
-    pub async fn read_body<B>(self) -> Result<B, Error>
+    pub async fn read_body<B>(mut self) -> Result<B, Error>
     where
         B: DeserializeOwned,
     {
-        let body = self.0.json::<B>().await?;
+        let body = self.0.body_json::<B>().await?;
         Ok(body)
     }
 }
